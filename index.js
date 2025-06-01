@@ -69,17 +69,8 @@ async function waitForDatabase(maxRetries = 5, retryInterval = 5000) {
     try {
       console.log(`Tentative de connexion à la base de données (${retries + 1}/${maxRetries})...`);
       console.log(`Configuration DB: ${JSON.stringify(dbConfig[currentEnv], null, 2)}`);
-      
-      if (currentEnv === 'development') {
-        // MySQL
-        const connection = await pool.getConnection();
-        connection.release();
-      } else {
-        // PostgreSQL
-        const client = await pool.connect();
-        client.release();
-      }
-      
+      const connection = await pool.getConnection();
+      connection.release();
       console.log('Connexion à la base de données réussie !');
       return true;
     } catch (error) {
@@ -151,105 +142,80 @@ const upload = multer({ storage });
 
 // 🔧 Création des tables au démarrage
 async function createTables() {
+  const connection = await pool.getConnection();
   try {
     console.log('Création des tables...');
     
     if (currentEnv === 'development') {
       // MySQL
-      const connection = await pool.getConnection();
-      try {
-        await connection.query(`
-          CREATE TABLE IF NOT EXISTS phrases (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            text VARCHAR(255) NOT NULL,
-            audio_count INT DEFAULT 0
-          )
-        `);
-        
-        // Vérifier si la colonne cloudinary_id existe
-        const [columns] = await connection.query(`
-          SELECT COLUMN_NAME 
-          FROM INFORMATION_SCHEMA.COLUMNS 
-          WHERE TABLE_NAME = 'audios' 
-          AND COLUMN_NAME = 'cloudinary_id'
-        `);
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS phrases (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          text VARCHAR(255) NOT NULL,
+          audio_count INT DEFAULT 0
+        )
+      `);
+      
+      // Vérifier si la colonne cloudinary_id existe
+      const [columns] = await connection.query(`
+        SELECT COLUMN_NAME 
+        FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_NAME = 'audios' 
+        AND COLUMN_NAME = 'cloudinary_id'
+      `);
 
-        // Créer la table audios si elle n'existe pas
-        await connection.query(`
-          CREATE TABLE IF NOT EXISTS audios (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            phrase_id INT NOT NULL,
-            user_id VARCHAR(100),
-            audio_url TEXT,
-            cloudinary_id VARCHAR(255),
-            validated BOOLEAN DEFAULT FALSE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (phrase_id) REFERENCES phrases(id)
-          )
-        `);
+      // Créer la table audios si elle n'existe pas
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS audios (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          phrase_id INT NOT NULL,
+          user_id VARCHAR(100),
+          audio_url TEXT,
+          cloudinary_id VARCHAR(255),
+          validated BOOLEAN DEFAULT FALSE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (phrase_id) REFERENCES phrases(id)
+        )
+      `);
 
-        // Ajouter la colonne cloudinary_id si elle n'existe pas
-        if (columns.length === 0) {
-          console.log('Ajout de la colonne cloudinary_id à la table audios...');
-          await connection.query(`
-            ALTER TABLE audios 
-            ADD COLUMN cloudinary_id VARCHAR(255) AFTER audio_url
-          `);
-        }
-      } finally {
-        connection.release();
+      // Ajouter la colonne cloudinary_id si elle n'existe pas
+      if (columns.length === 0) {
+        console.log('Ajout de la colonne cloudinary_id à la table audios...');
+        await connection.query(`
+          ALTER TABLE audios 
+          ADD COLUMN cloudinary_id VARCHAR(255) AFTER audio_url
+        `);
       }
     } else {
       // PostgreSQL
-      const client = await pool.connect();
-      try {
-        await client.query(`
-          CREATE TABLE IF NOT EXISTS phrases (
-            id SERIAL PRIMARY KEY,
-            text VARCHAR(255) NOT NULL,
-            audio_count INTEGER DEFAULT 0
-          )
-        `);
-        
-        // Vérifier si la colonne cloudinary_id existe
-        const result = await client.query(`
-          SELECT column_name 
-          FROM information_schema.columns 
-          WHERE table_name = 'audios' 
-          AND column_name = 'cloudinary_id'
-        `);
-
-        // Créer la table audios si elle n'existe pas
-        await client.query(`
-          CREATE TABLE IF NOT EXISTS audios (
-            id SERIAL PRIMARY KEY,
-            phrase_id INTEGER NOT NULL,
-            user_id VARCHAR(100),
-            audio_url TEXT,
-            cloudinary_id VARCHAR(255),
-            validated BOOLEAN DEFAULT FALSE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (phrase_id) REFERENCES phrases(id)
-          )
-        `);
-
-        // Ajouter la colonne cloudinary_id si elle n'existe pas
-        if (result.rows.length === 0) {
-          console.log('Ajout de la colonne cloudinary_id à la table audios...');
-          await client.query(`
-            ALTER TABLE audios 
-            ADD COLUMN cloudinary_id VARCHAR(255)
-          `);
-        }
-      } finally {
-        client.release();
-      }
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS phrases (
+          id SERIAL PRIMARY KEY,
+          text VARCHAR(255) NOT NULL,
+          audio_count INTEGER DEFAULT 0
+        )
+      `);
+      
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS audios (
+          id SERIAL PRIMARY KEY,
+          phrase_id INTEGER NOT NULL,
+          user_id VARCHAR(100),
+          audio_url TEXT,
+          cloudinary_id VARCHAR(255),
+          validated BOOLEAN DEFAULT FALSE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (phrase_id) REFERENCES phrases(id)
+        )
+      `);
     }
     
     console.log('Tables créées avec succès !');
   } catch (error) {
     console.error('Erreur lors de la création des tables:', error);
     throw error;
+  } finally {
+    connection.release();
   }
 }
 
@@ -257,12 +223,12 @@ async function importPhrases() {
   try {
     // Attendre que la base de données soit prête
     await waitForDatabase();
+    const connection = await pool.getConnection();
     
-    if (currentEnv === 'development') {
-      // MySQL
-      const connection = await pool.getConnection();
-      try {
-        // Création des tables si elles n'existent pas
+    try {
+      // Création des tables si elles n'existent pas
+      if (currentEnv === 'development') {
+        // MySQL
         await connection.query(`
           CREATE TABLE IF NOT EXISTS phrases (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -283,79 +249,9 @@ async function importPhrases() {
             FOREIGN KEY (phrase_id) REFERENCES phrases(id)
           )
         `);
-
-        // Lire le fichier JSON
-        const phrasesPath = path.join(__dirname, 'data', 'phrases.json');
-        console.log('Chemin absolu du fichier:', phrasesPath);
-        console.log('__dirname:', __dirname);
-        console.log('Vérification de l\'existence du fichier:', fs.existsSync(phrasesPath));
-        
-        try {
-          const jsonData = await fsp.readFile(phrasesPath, 'utf8');
-          const phrases = JSON.parse(jsonData);
-          console.log(`Nombre de phrases à importer : ${phrases.length}`);
-
-          // Vérifier si des phrases existent déjà
-          const [result] = await connection.query('SELECT COUNT(*) as count FROM phrases');
-          const existingCount = parseInt(result[0].count);
-          console.log(`Nombre de phrases existantes : ${existingCount}`);
-
-          if (existingCount > 0) {
-            const shouldContinue = process.env.FORCE_IMPORT === 'true';
-            if (!shouldContinue) {
-              console.log('Des phrases existent déjà. Pour forcer l\'importation, définissez FORCE_IMPORT=true');
-              return;
-            }
-            console.log('FORCE_IMPORT=true détecté, importation forcée...');
-          }
-
-          // Insérer chaque phrase
-          let insertedCount = 0;
-          let skippedCount = 0;
-          
-          await connection.beginTransaction();
-          
-          for (const item of phrases) {
-            try {
-              // Vérifier si la phrase existe déjà
-              const [existing] = await connection.query('SELECT id FROM phrases WHERE text = ?', [item.phrase]);
-              if (existing.length > 0) {
-                skippedCount++;
-                continue;
-              }
-
-              await connection.query('INSERT INTO phrases (text) VALUES (?)', [item.phrase]);
-              insertedCount++;
-              
-              if (insertedCount % 100 === 0) {
-                console.log(`${insertedCount} phrases insérées...`);
-              }
-            } catch (error) {
-              console.error(`Erreur lors de l'insertion de la phrase: ${item.phrase}`, error);
-            }
-          }
-          
-          await connection.commit();
-
-          console.log('\nImportation terminée !');
-          console.log(`- ${insertedCount} nouvelles phrases insérées`);
-          console.log(`- ${skippedCount} phrases ignorées (déjà existantes)`);
-          console.log(`- Total des phrases dans la base : ${existingCount + insertedCount}`);
-
-        } catch (error) {
-          await connection.rollback();
-          console.error('Erreur lors de la lecture du fichier phrases.json:', error);
-          throw error;
-        }
-      } finally {
-        connection.release();
-      }
-    } else {
-      // PostgreSQL
-      const client = await pool.connect();
-      try {
-        // Création des tables si elles n'existent pas
-        await client.query(`
+      } else {
+        // PostgreSQL
+        await connection.query(`
           CREATE TABLE IF NOT EXISTS phrases (
             id SERIAL PRIMARY KEY,
             text VARCHAR(255) NOT NULL,
@@ -363,7 +259,7 @@ async function importPhrases() {
           )
         `);
         
-        await client.query(`
+        await connection.query(`
           CREATE TABLE IF NOT EXISTS audios (
             id SERIAL PRIMARY KEY,
             phrase_id INTEGER NOT NULL,
@@ -375,73 +271,76 @@ async function importPhrases() {
             FOREIGN KEY (phrase_id) REFERENCES phrases(id)
           )
         `);
-
-        // Lire le fichier JSON
-        const phrasesPath = path.join(__dirname, 'data', 'phrases.json');
-        console.log('Chemin absolu du fichier:', phrasesPath);
-        console.log('__dirname:', __dirname);
-        console.log('Vérification de l\'existence du fichier:', fs.existsSync(phrasesPath));
-        
-        try {
-          const jsonData = await fsp.readFile(phrasesPath, 'utf8');
-          const phrases = JSON.parse(jsonData);
-          console.log(`Nombre de phrases à importer : ${phrases.length}`);
-
-          // Vérifier si des phrases existent déjà
-          const result = await client.query('SELECT COUNT(*) as count FROM phrases');
-          const existingCount = parseInt(result.rows[0].count);
-          console.log(`Nombre de phrases existantes : ${existingCount}`);
-
-          if (existingCount > 0) {
-            const shouldContinue = process.env.FORCE_IMPORT === 'true';
-            if (!shouldContinue) {
-              console.log('Des phrases existent déjà. Pour forcer l\'importation, définissez FORCE_IMPORT=true');
-              return;
-            }
-            console.log('FORCE_IMPORT=true détecté, importation forcée...');
-          }
-
-          // Insérer chaque phrase
-          let insertedCount = 0;
-          let skippedCount = 0;
-          
-          await client.query('BEGIN');
-          
-          for (const item of phrases) {
-            try {
-              // Vérifier si la phrase existe déjà
-              const existing = await client.query('SELECT id FROM phrases WHERE text = $1', [item.phrase]);
-              if (existing.rows.length > 0) {
-                skippedCount++;
-                continue;
-              }
-
-              await client.query('INSERT INTO phrases (text) VALUES ($1)', [item.phrase]);
-              insertedCount++;
-              
-              if (insertedCount % 100 === 0) {
-                console.log(`${insertedCount} phrases insérées...`);
-              }
-            } catch (error) {
-              console.error(`Erreur lors de l'insertion de la phrase: ${item.phrase}`, error);
-            }
-          }
-          
-          await client.query('COMMIT');
-
-          console.log('\nImportation terminée !');
-          console.log(`- ${insertedCount} nouvelles phrases insérées`);
-          console.log(`- ${skippedCount} phrases ignorées (déjà existantes)`);
-          console.log(`- Total des phrases dans la base : ${existingCount + insertedCount}`);
-
-        } catch (error) {
-          await client.query('ROLLBACK');
-          console.error('Erreur lors de la lecture du fichier phrases.json:', error);
-          throw error;
-        }
-      } finally {
-        client.release();
       }
+
+      // Lire le fichier JSON
+      const phrasesPath = path.join(__dirname, 'data', 'phrases.json');
+      console.log('Chemin absolu du fichier:', phrasesPath);
+      console.log('__dirname:', __dirname);
+      console.log('Vérification de l\'existence du fichier:', fs.existsSync(phrasesPath));
+      
+      try {
+        const jsonData = await fsp.readFile(phrasesPath, 'utf8');
+        const phrases = JSON.parse(jsonData);
+        console.log(`Nombre de phrases à importer : ${phrases.length}`);
+
+        // Vérifier si des phrases existent déjà
+        const [result] = await connection.query('SELECT COUNT(*) as count FROM phrases');
+        const existingCount = parseInt(result[0].count);
+        console.log(`Nombre de phrases existantes : ${existingCount}`);
+
+        if (existingCount > 0) {
+          const shouldContinue = process.env.FORCE_IMPORT === 'true';
+          if (!shouldContinue) {
+            console.log('Des phrases existent déjà. Pour forcer l\'importation, définissez FORCE_IMPORT=true');
+            return;
+          }
+          console.log('FORCE_IMPORT=true détecté, importation forcée...');
+        }
+
+        // Insérer chaque phrase
+        let insertedCount = 0;
+        let skippedCount = 0;
+        
+        await connection.beginTransaction();
+        
+        for (const item of phrases) {
+          try {
+            // Vérifier si la phrase existe déjà
+            const [existing] = await connection.query('SELECT id FROM phrases WHERE text = ?', [item.phrase]);
+            if (existing.length > 0) {
+              skippedCount++;
+              continue;
+            }
+
+            await connection.query('INSERT INTO phrases (text) VALUES (?)', [item.phrase]);
+            insertedCount++;
+            
+            if (insertedCount % 100 === 0) {
+              console.log(`${insertedCount} phrases insérées...`);
+            }
+          } catch (error) {
+            console.error(`Erreur lors de l'insertion de la phrase: ${item.phrase}`, error);
+          }
+        }
+        
+        await connection.commit();
+
+        console.log('\nImportation terminée !');
+        console.log(`- ${insertedCount} nouvelles phrases insérées`);
+        console.log(`- ${skippedCount} phrases ignorées (déjà existantes)`);
+        console.log(`- Total des phrases dans la base : ${existingCount + insertedCount}`);
+
+      } catch (error) {
+        console.error('Erreur lors de la lecture du fichier phrases.json:', error);
+        throw error;
+      }
+
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
     }
   } catch (error) {
     console.error('Erreur lors de l\'importation:', error);
@@ -518,67 +417,34 @@ app.post('/audios', upload.single('audio'), async (req, res) => {
 
 // 📄 Récupérer une phrase avec audio_count < 10
 app.get('/phrases/next', async (req, res) => {
+  const connection = await pool.getConnection();
   try {
-    if (currentEnv === 'development') {
-      // MySQL
-      const connection = await pool.getConnection();
-      try {
-        const [rows] = await connection.query(
-          'SELECT * FROM phrases WHERE audio_count < 10 ORDER BY RAND() LIMIT 1'
-        );
-        res.json(rows[0] || {});
-      } finally {
-        connection.release();
-      }
-    } else {
-      // PostgreSQL
-      const client = await pool.connect();
-      try {
-        const result = await client.query(
-          'SELECT * FROM phrases WHERE audio_count < 10 ORDER BY RANDOM() LIMIT 1'
-        );
-        res.json(result.rows[0] || {});
-      } finally {
-        client.release();
-      }
-    }
+    const [rows] = await connection.query(
+      'SELECT * FROM phrases WHERE audio_count < 10 ORDER BY RAND() LIMIT 1'
+    );
+    res.json(rows[0] || {});
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur lors de la récupération.' });
+  } finally {
+    connection.release();
   }
 });
 
 // 📊 Récupérer le nombre de traductions par utilisateur
 app.get('/stats/:email', async (req, res) => {
+  const connection = await pool.getConnection();
   try {
-    if (currentEnv === 'development') {
-      // MySQL
-      const connection = await pool.getConnection();
-      try {
-        const [rows] = await connection.query(
-          'SELECT COUNT(*) as count FROM audios WHERE user_id = ?',
-          [req.params.email]
-        );
-        res.json({ count: parseInt(rows[0].count) });
-      } finally {
-        connection.release();
-      }
-    } else {
-      // PostgreSQL
-      const client = await pool.connect();
-      try {
-        const result = await client.query(
-          'SELECT COUNT(*) as count FROM audios WHERE user_id = $1',
-          [req.params.email]
-        );
-        res.json({ count: parseInt(result.rows[0].count) });
-      } finally {
-        client.release();
-      }
-    }
+    const [rows] = await connection.query(
+      'SELECT COUNT(*) as count FROM audios WHERE user_id = ?',
+      [req.params.email]
+    );
+    res.json({ count: parseInt(rows[0].count) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur lors de la récupération des statistiques.' });
+  } finally {
+    connection.release();
   }
 });
 
