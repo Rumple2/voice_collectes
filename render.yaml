@@ -2,11 +2,15 @@ services:
   - type: web
     name: voice-collectes
     env: node
-    buildCommand: npm install
+    buildCommand: |
+      npm install
+      node scripts/import-phrases.js
     startCommand: node index.js
     envVars:
       - key: NODE_ENV
         value: production
+      - key: FORCE_IMPORT
+        value: "true"
       - key: DB_HOST
         fromDatabase:
           name: voice-collectes-db

@@ -28,6 +28,47 @@ const dbConfig = {
   database: process.env.DB_NAME
 };
 
+// 🔍 Vérifier la configuration
+app.get('/check-config', async (req, res) => {
+  try {
+    // Vérifier la connexion à la base de données
+    const conn = await mysql.createConnection(dbConfig);
+    const [dbResult] = await conn.query('SELECT 1');
+    await conn.end();
+
+    // Vérifier les dossiers
+    const uploadsExists = fs.existsSync(uploadsDir);
+    const exportsExists = fs.existsSync(exportsDir);
+
+    res.json({
+      status: 'ok',
+      environment: process.env.NODE_ENV,
+      database: {
+        connected: dbResult.length > 0,
+        host: process.env.DB_HOST,
+        database: process.env.DB_NAME,
+        user: process.env.DB_USER
+      },
+      directories: {
+        uploads: uploadsExists,
+        exports: exportsExists
+      },
+      forceImport: process.env.FORCE_IMPORT === 'true'
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'error',
+      message: error.message,
+      environment: process.env.NODE_ENV,
+      database: {
+        host: process.env.DB_HOST,
+        database: process.env.DB_NAME,
+        user: process.env.DB_USER
+      }
+    });
+  }
+});
+
 // 📥 Configurer Multer pour upload audio
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
