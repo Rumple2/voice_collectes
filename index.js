@@ -1,6 +1,6 @@
 // 📁 backend/index.js
 const express = require('express');
-const mysql = require('mysql2/promise');
+const { Pool } = require('pg');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -20,13 +20,14 @@ app.use(express.json());
 app.use(express.static('public'));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// 🗄️ Connexion MySQL
-const dbConfig = {
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME
-};
+// 🗄️ Connexion PostgreSQL
+const pool = new Pool({
+  host: process.env.DB_HOST || 'dpg-d0u4hv63jp1c73fdi5b0-a',
+  port: process.env.DB_PORT || 5432,
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || 'ymx3p24csJolVG1VFCCsbzHxPH7d7ApP',
+  database: process.env.DB_NAME || 'voice_collectes'
+});
 
 // 🔄 Fonction de reconnexion à la base de données
 async function waitForDatabase(maxRetries = 5, retryInterval = 5000) {
@@ -35,8 +36,8 @@ async function waitForDatabase(maxRetries = 5, retryInterval = 5000) {
   while (retries < maxRetries) {
     try {
       console.log(`Tentative de connexion à la base de données (${retries + 1}/${maxRetries})...`);
-      const conn = await mysql.createConnection(dbConfig);
-      await conn.end();
+      const client = await pool.connect();
+      client.release();
       console.log('Connexion à la base de données réussie !');
       return true;
     } catch (error) {
@@ -57,9 +58,9 @@ async function waitForDatabase(maxRetries = 5, retryInterval = 5000) {
 app.get('/check-config', async (req, res) => {
   try {
     // Vérifier la connexion à la base de données
-    const conn = await mysql.createConnection(dbConfig);
-    const [dbResult] = await conn.query('SELECT 1');
-    await conn.end();
+    const client = await pool.connect();
+    const dbResult = await client.query('SELECT 1');
+    client.release();
 
     // Vérifier les dossiers
     const uploadsExists = fs.existsSync(uploadsDir);
@@ -69,7 +70,7 @@ app.get('/check-config', async (req, res) => {
       status: 'ok',
       environment: process.env.NODE_ENV,
       database: {
-        connected: dbResult.length > 0,
+        connected: dbResult.rows.length > 0,
         host: process.env.DB_HOST,
         database: process.env.DB_NAME,
         user: process.env.DB_USER
@@ -108,19 +109,19 @@ const upload = multer({ storage });
 
 // 🔧 Création des tables au démarrage
 async function createTables() {
+  const client = await pool.connect();
   try {
-    const conn = await mysql.createConnection(dbConfig);
     console.log('Création des tables...');
     
-    await conn.query(`CREATE TABLE IF NOT EXISTS phrases (
-      id INT AUTO_INCREMENT PRIMARY KEY,
+    await client.query(`CREATE TABLE IF NOT EXISTS phrases (
+      id SERIAL PRIMARY KEY,
       text VARCHAR(255) NOT NULL,
-      audio_count INT DEFAULT 0
+      audio_count INTEGER DEFAULT 0
     )`);
     
-    await conn.query(`CREATE TABLE IF NOT EXISTS audios (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      phrase_id INT NOT NULL,
+    await client.query(`CREATE TABLE IF NOT EXISTS audios (
+      id SERIAL PRIMARY KEY,
+      phrase_id INTEGER NOT NULL,
       user_id VARCHAR(100),
       audio_url TEXT,
       validated BOOLEAN DEFAULT FALSE,
@@ -128,11 +129,12 @@ async function createTables() {
       FOREIGN KEY (phrase_id) REFERENCES phrases(id)
     )`);
     
-    await conn.end();
     console.log('Tables créées avec succès !');
   } catch (error) {
     console.error('Erreur lors de la création des tables:', error);
     throw error;
+  } finally {
+    client.release();
   }
 }
 
@@ -141,56 +143,67 @@ app.post('/audios', upload.single('audio'), async (req, res) => {
   const { phrase_id, user_id } = req.body;
   const audio_url = `/uploads/audio/${req.file.filename}`;
 
+  const client = await pool.connect();
   try {
-    const conn = await mysql.createConnection(dbConfig);
-    await conn.query('INSERT INTO audios (phrase_id, user_id, audio_url) VALUES (?, ?, ?)', [phrase_id, user_id, audio_url]);
-    await conn.query('UPDATE phrases SET audio_count = audio_count + 1 WHERE id = ?', [phrase_id]);
-    await conn.end();
+    await client.query('BEGIN');
+    await client.query('INSERT INTO audios (phrase_id, user_id, audio_url) VALUES ($1, $2, $3)', 
+      [phrase_id, user_id, audio_url]);
+    await client.query('UPDATE phrases SET audio_count = audio_count + 1 WHERE id = $1', [phrase_id]);
+    await client.query('COMMIT');
     res.json({ success: true, audio_url });
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error(err);
     res.status(500).json({ error: 'Erreur lors de l\'enregistrement.' });
+  } finally {
+    client.release();
   }
 });
 
 // 📄 Récupérer une phrase avec audio_count < 10
 app.get('/phrases/next', async (req, res) => {
+  const client = await pool.connect();
   try {
-    const conn = await mysql.createConnection(dbConfig);
-    const [rows] = await conn.query('SELECT * FROM phrases WHERE audio_count < 10 ORDER BY RAND() LIMIT 1');
-    await conn.end();
-    res.json(rows[0] || {});
+    const result = await client.query(
+      'SELECT * FROM phrases WHERE audio_count < 10 ORDER BY RANDOM() LIMIT 1'
+    );
+    res.json(result.rows[0] || {});
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur lors de la récupération.' });
+  } finally {
+    client.release();
   }
 });
 
 // 📊 Récupérer le nombre de traductions par utilisateur
 app.get('/stats/:email', async (req, res) => {
+  const client = await pool.connect();
   try {
-    const conn = await mysql.createConnection(dbConfig);
-    const [rows] = await conn.query('SELECT COUNT(*) as count FROM audios WHERE user_id = ?', [req.params.email]);
-    await conn.end();
-    res.json({ count: rows[0].count });
+    const result = await client.query(
+      'SELECT COUNT(*) as count FROM audios WHERE user_id = $1',
+      [req.params.email]
+    );
+    res.json({ count: parseInt(result.rows[0].count) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur lors de la récupération des statistiques.' });
+  } finally {
+    client.release();
   }
 });
 
 // 📦 Exporter toutes les audios avec texte en Excel
 app.get('/export/audios', async (req, res) => {
+  const client = await pool.connect();
   try {
-    const conn = await mysql.createConnection(dbConfig);
-    const [rows] = await conn.query(`
+    const result = await client.query(`
       SELECT a.id, p.text AS phrase, a.user_id, a.audio_url, a.created_at
       FROM audios a
       JOIN phrases p ON a.phrase_id = p.id
     `);
-    await conn.end();
 
-    const worksheet = xlsx.utils.json_to_sheet(rows);
+    const worksheet = xlsx.utils.json_to_sheet(result.rows);
     const workbook = xlsx.utils.book_new();
     xlsx.utils.book_append_sheet(workbook, worksheet, 'Audios');
 
@@ -201,6 +214,8 @@ app.get('/export/audios', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur lors de l\'exportation.' });
+  } finally {
+    client.release();
   }
 });
 

@@ -1,23 +1,26 @@
-const mysql = require('mysql2/promise');
+const { Pool } = require('pg');
 const fs = require('fs').promises;
 const path = require('path');
 require('dotenv').config();
 
 async function waitForDatabase(maxRetries = 10, retryInterval = 10000) {
+  const pool = new Pool({
+    host: process.env.DB_HOST || 'dpg-d0u4hv63jp1c73fdi5b0-a',
+    port: process.env.DB_PORT || 5432,
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || 'ymx3p24csJolVG1VFCCsbzHxPH7d7ApP',
+    database: process.env.DB_NAME || 'voice_collectes'
+  });
+
   let retries = 0;
   
   while (retries < maxRetries) {
     try {
       console.log(`Tentative de connexion à la base de données (${retries + 1}/${maxRetries})...`);
-      const conn = await mysql.createConnection({
-        host: process.env.DB_HOST,
-        user: process.env.DB_USER,
-        password: process.env.DB_PASSWORD,
-        database: process.env.DB_NAME
-      });
-      await conn.end();
+      const client = await pool.connect();
+      client.release();
       console.log('Connexion à la base de données réussie !');
-      return true;
+      return pool;
     } catch (error) {
       retries++;
       console.error(`Erreur de connexion (${retries}/${maxRetries}):`, error.message);
@@ -31,74 +34,70 @@ async function waitForDatabase(maxRetries = 10, retryInterval = 10000) {
   
   console.error('Impossible de se connecter à la base de données après plusieurs tentatives');
   console.log('L\'importation sera effectuée au prochain déploiement');
-  process.exit(0); // Exit with success to allow the build to continue
+  process.exit(0);
 }
 
 async function importPhrases() {
   try {
     // Attendre que la base de données soit prête
-    await waitForDatabase();
+    const pool = await waitForDatabase();
 
     // Lire le fichier JSON
     const jsonData = await fs.readFile(path.join(__dirname, '../data/phrases.json'), 'utf8');
     const phrases = JSON.parse(jsonData);
 
-    // Configuration de la base de données
-    const dbConfig = {
-      host: process.env.DB_HOST,
-      user: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME
-    };
-
-    // Connexion à la base de données
-    const connection = await mysql.createConnection(dbConfig);
-    console.log('Connecté à la base de données');
-
     // Vérifier si des phrases existent déjà
-    const [existingPhrases] = await connection.query('SELECT COUNT(*) as count FROM phrases');
-    if (existingPhrases[0].count > 0) {
-      console.log(`${existingPhrases[0].count} phrases existent déjà dans la base de données.`);
-      const shouldContinue = process.env.FORCE_IMPORT === 'true';
-      if (!shouldContinue) {
-        console.log('Pour forcer l\'importation, définissez FORCE_IMPORT=true dans les variables d\'environnement.');
-        await connection.end();
-        return;
-      }
-    }
-
-    // Préparer la requête d'insertion
-    const insertQuery = 'INSERT INTO phrases (text) VALUES (?)';
-    
-    // Insérer chaque phrase
-    let insertedCount = 0;
-    let skippedCount = 0;
-    for (const item of phrases) {
-      try {
-        // Vérifier si la phrase existe déjà
-        const [existing] = await connection.query('SELECT id FROM phrases WHERE text = ?', [item.phrase]);
-        if (existing.length > 0) {
-          skippedCount++;
-          continue;
+    const client = await pool.connect();
+    try {
+      const result = await client.query('SELECT COUNT(*) as count FROM phrases');
+      if (parseInt(result.rows[0].count) > 0) {
+        console.log(`${result.rows[0].count} phrases existent déjà dans la base de données.`);
+        const shouldContinue = process.env.FORCE_IMPORT === 'true';
+        if (!shouldContinue) {
+          console.log('Pour forcer l\'importation, définissez FORCE_IMPORT=true dans les variables d\'environnement.');
+          return;
         }
-
-        await connection.query(insertQuery, [item.phrase]);
-        insertedCount++;
-        if (insertedCount % 100 === 0) {
-          console.log(`${insertedCount} phrases insérées...`);
-        }
-      } catch (error) {
-        console.error(`Erreur lors de l'insertion de la phrase: ${item.phrase}`, error);
       }
-    }
 
-    console.log(`\nImportation terminée !`);
-    console.log(`- ${insertedCount} nouvelles phrases insérées`);
-    console.log(`- ${skippedCount} phrases ignorées (déjà existantes)`);
-    await connection.end();
+      // Insérer chaque phrase
+      let insertedCount = 0;
+      let skippedCount = 0;
+      
+      await client.query('BEGIN');
+      
+      for (const item of phrases) {
+        try {
+          // Vérifier si la phrase existe déjà
+          const existing = await client.query('SELECT id FROM phrases WHERE text = $1', [item.phrase]);
+          if (existing.rows.length > 0) {
+            skippedCount++;
+            continue;
+          }
+
+          await client.query('INSERT INTO phrases (text) VALUES ($1)', [item.phrase]);
+          insertedCount++;
+          if (insertedCount % 100 === 0) {
+            console.log(`${insertedCount} phrases insérées...`);
+          }
+        } catch (error) {
+          console.error(`Erreur lors de l'insertion de la phrase: ${item.phrase}`, error);
+        }
+      }
+      
+      await client.query('COMMIT');
+
+      console.log(`\nImportation terminée !`);
+      console.log(`- ${insertedCount} nouvelles phrases insérées`);
+      console.log(`- ${skippedCount} phrases ignorées (déjà existantes)`);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+      await pool.end();
+    }
   } catch (error) {
     console.error('Erreur lors de l\'importation:', error);
-    // Ne pas échouer le build en cas d'erreur
     process.exit(0);
   }
 }

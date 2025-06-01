@@ -15,6 +15,10 @@ services:
         fromDatabase:
           name: voice-collectes-db
           property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: voice-collectes-db
+          property: port
       - key: DB_USER
         fromDatabase:
           name: voice-collectes-db
@@ -32,5 +36,5 @@ services:
 databases:
   - name: voice-collectes-db
     databaseName: voice_collectes
-    user: voice_collectes_user
+    user: root
     plan: free 
