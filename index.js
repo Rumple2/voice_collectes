@@ -518,34 +518,67 @@ app.post('/audios', upload.single('audio'), async (req, res) => {
 
 // 📄 Récupérer une phrase avec audio_count < 10
 app.get('/phrases/next', async (req, res) => {
-  const connection = await pool.getConnection();
   try {
-    const [rows] = await connection.query(
-      'SELECT * FROM phrases WHERE audio_count < 10 ORDER BY RAND() LIMIT 1'
-    );
-    res.json(rows[0] || {});
+    if (currentEnv === 'development') {
+      // MySQL
+      const connection = await pool.getConnection();
+      try {
+        const [rows] = await connection.query(
+          'SELECT * FROM phrases WHERE audio_count < 10 ORDER BY RAND() LIMIT 1'
+        );
+        res.json(rows[0] || {});
+      } finally {
+        connection.release();
+      }
+    } else {
+      // PostgreSQL
+      const client = await pool.connect();
+      try {
+        const result = await client.query(
+          'SELECT * FROM phrases WHERE audio_count < 10 ORDER BY RANDOM() LIMIT 1'
+        );
+        res.json(result.rows[0] || {});
+      } finally {
+        client.release();
+      }
+    }
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur lors de la récupération.' });
-  } finally {
-    connection.release();
   }
 });
 
 // 📊 Récupérer le nombre de traductions par utilisateur
 app.get('/stats/:email', async (req, res) => {
-  const connection = await pool.getConnection();
   try {
-    const [rows] = await connection.query(
-      'SELECT COUNT(*) as count FROM audios WHERE user_id = ?',
-      [req.params.email]
-    );
-    res.json({ count: parseInt(rows[0].count) });
+    if (currentEnv === 'development') {
+      // MySQL
+      const connection = await pool.getConnection();
+      try {
+        const [rows] = await connection.query(
+          'SELECT COUNT(*) as count FROM audios WHERE user_id = ?',
+          [req.params.email]
+        );
+        res.json({ count: parseInt(rows[0].count) });
+      } finally {
+        connection.release();
+      }
+    } else {
+      // PostgreSQL
+      const client = await pool.connect();
+      try {
+        const result = await client.query(
+          'SELECT COUNT(*) as count FROM audios WHERE user_id = $1',
+          [req.params.email]
+        );
+        res.json({ count: parseInt(result.rows[0].count) });
+      } finally {
+        client.release();
+      }
+    }
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur lors de la récupération des statistiques.' });
-  } finally {
-    connection.release();
   }
 });
 
