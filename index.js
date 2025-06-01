@@ -214,7 +214,9 @@ async function importPhrases() {
 
       // Lire le fichier JSON
       const phrasesPath = path.join(__dirname, 'data', 'phrases.json');
-      console.log('Tentative de lecture du fichier:', phrasesPath);
+      console.log('Chemin absolu du fichier:', phrasesPath);
+      console.log('__dirname:', __dirname);
+      console.log('Vérification de l\'existence du fichier:', fs.existsSync(phrasesPath));
       
       try {
         const jsonData = await fsp.readFile(phrasesPath, 'utf8');
