@@ -28,6 +28,31 @@ const dbConfig = {
   database: process.env.DB_NAME
 };
 
+// 🔄 Fonction de reconnexion à la base de données
+async function waitForDatabase(maxRetries = 5, retryInterval = 5000) {
+  let retries = 0;
+  
+  while (retries < maxRetries) {
+    try {
+      console.log(`Tentative de connexion à la base de données (${retries + 1}/${maxRetries})...`);
+      const conn = await mysql.createConnection(dbConfig);
+      await conn.end();
+      console.log('Connexion à la base de données réussie !');
+      return true;
+    } catch (error) {
+      retries++;
+      console.error(`Erreur de connexion (${retries}/${maxRetries}):`, error.message);
+      
+      if (retries < maxRetries) {
+        console.log(`Nouvelle tentative dans ${retryInterval/1000} secondes...`);
+        await new Promise(resolve => setTimeout(resolve, retryInterval));
+      }
+    }
+  }
+  
+  throw new Error('Impossible de se connecter à la base de données après plusieurs tentatives');
+}
+
 // 🔍 Vérifier la configuration
 app.get('/check-config', async (req, res) => {
   try {
@@ -83,22 +108,32 @@ const upload = multer({ storage });
 
 // 🔧 Création des tables au démarrage
 async function createTables() {
-  const conn = await mysql.createConnection(dbConfig);
-  await conn.query(`CREATE TABLE IF NOT EXISTS phrases (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    text VARCHAR(255) NOT NULL,
-    audio_count INT DEFAULT 0
-  )`);
-  await conn.query(`CREATE TABLE IF NOT EXISTS audios (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    phrase_id INT NOT NULL,
-    user_id VARCHAR(100),
-    audio_url TEXT,
-    validated BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (phrase_id) REFERENCES phrases(id)
-  )`);
-  await conn.end();
+  try {
+    const conn = await mysql.createConnection(dbConfig);
+    console.log('Création des tables...');
+    
+    await conn.query(`CREATE TABLE IF NOT EXISTS phrases (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      text VARCHAR(255) NOT NULL,
+      audio_count INT DEFAULT 0
+    )`);
+    
+    await conn.query(`CREATE TABLE IF NOT EXISTS audios (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      phrase_id INT NOT NULL,
+      user_id VARCHAR(100),
+      audio_url TEXT,
+      validated BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (phrase_id) REFERENCES phrases(id)
+    )`);
+    
+    await conn.end();
+    console.log('Tables créées avec succès !');
+  } catch (error) {
+    console.error('Erreur lors de la création des tables:', error);
+    throw error;
+  }
 }
 
 // 📤 Upload audio (auth: user_id = email)
@@ -171,6 +206,14 @@ app.get('/export/audios', async (req, res) => {
 
 // 🚀 Démarrer serveur et créer tables
 app.listen(port, async () => {
-  await createTables();
-  console.log(`Serveur démarré sur http://localhost:${port}`);
+  try {
+    console.log(`Serveur démarré sur http://localhost:${port}`);
+    console.log('Attente de la base de données...');
+    await waitForDatabase();
+    await createTables();
+    console.log('Application prête !');
+  } catch (error) {
+    console.error('Erreur au démarrage:', error);
+    process.exit(1);
+  }
 });

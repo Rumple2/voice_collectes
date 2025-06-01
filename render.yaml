@@ -4,7 +4,7 @@ services:
     env: node
     buildCommand: |
       npm install
-      node scripts/import-phrases.js
+      node scripts/post-deploy.js
     startCommand: node index.js
     envVars:
       - key: NODE_ENV
@@ -27,6 +27,7 @@ services:
         fromDatabase:
           name: voice-collectes-db
           property: database
+    healthCheckPath: /check-config
 
 databases:
   - name: voice-collectes-db
