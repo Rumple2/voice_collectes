@@ -257,12 +257,12 @@ async function importPhrases() {
   try {
     // Attendre que la base de données soit prête
     await waitForDatabase();
-    const connection = await pool.getConnection();
     
-    try {
-      // Création des tables si elles n'existent pas
-      if (currentEnv === 'development') {
-        // MySQL
+    if (currentEnv === 'development') {
+      // MySQL
+      const connection = await pool.getConnection();
+      try {
+        // Création des tables si elles n'existent pas
         await connection.query(`
           CREATE TABLE IF NOT EXISTS phrases (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -283,9 +283,79 @@ async function importPhrases() {
             FOREIGN KEY (phrase_id) REFERENCES phrases(id)
           )
         `);
-      } else {
-        // PostgreSQL
-        await connection.query(`
+
+        // Lire le fichier JSON
+        const phrasesPath = path.join(__dirname, 'data', 'phrases.json');
+        console.log('Chemin absolu du fichier:', phrasesPath);
+        console.log('__dirname:', __dirname);
+        console.log('Vérification de l\'existence du fichier:', fs.existsSync(phrasesPath));
+        
+        try {
+          const jsonData = await fsp.readFile(phrasesPath, 'utf8');
+          const phrases = JSON.parse(jsonData);
+          console.log(`Nombre de phrases à importer : ${phrases.length}`);
+
+          // Vérifier si des phrases existent déjà
+          const [result] = await connection.query('SELECT COUNT(*) as count FROM phrases');
+          const existingCount = parseInt(result[0].count);
+          console.log(`Nombre de phrases existantes : ${existingCount}`);
+
+          if (existingCount > 0) {
+            const shouldContinue = process.env.FORCE_IMPORT === 'true';
+            if (!shouldContinue) {
+              console.log('Des phrases existent déjà. Pour forcer l\'importation, définissez FORCE_IMPORT=true');
+              return;
+            }
+            console.log('FORCE_IMPORT=true détecté, importation forcée...');
+          }
+
+          // Insérer chaque phrase
+          let insertedCount = 0;
+          let skippedCount = 0;
+          
+          await connection.beginTransaction();
+          
+          for (const item of phrases) {
+            try {
+              // Vérifier si la phrase existe déjà
+              const [existing] = await connection.query('SELECT id FROM phrases WHERE text = ?', [item.phrase]);
+              if (existing.length > 0) {
+                skippedCount++;
+                continue;
+              }
+
+              await connection.query('INSERT INTO phrases (text) VALUES (?)', [item.phrase]);
+              insertedCount++;
+              
+              if (insertedCount % 100 === 0) {
+                console.log(`${insertedCount} phrases insérées...`);
+              }
+            } catch (error) {
+              console.error(`Erreur lors de l'insertion de la phrase: ${item.phrase}`, error);
+            }
+          }
+          
+          await connection.commit();
+
+          console.log('\nImportation terminée !');
+          console.log(`- ${insertedCount} nouvelles phrases insérées`);
+          console.log(`- ${skippedCount} phrases ignorées (déjà existantes)`);
+          console.log(`- Total des phrases dans la base : ${existingCount + insertedCount}`);
+
+        } catch (error) {
+          await connection.rollback();
+          console.error('Erreur lors de la lecture du fichier phrases.json:', error);
+          throw error;
+        }
+      } finally {
+        connection.release();
+      }
+    } else {
+      // PostgreSQL
+      const client = await pool.connect();
+      try {
+        // Création des tables si elles n'existent pas
+        await client.query(`
           CREATE TABLE IF NOT EXISTS phrases (
             id SERIAL PRIMARY KEY,
             text VARCHAR(255) NOT NULL,
@@ -293,7 +363,7 @@ async function importPhrases() {
           )
         `);
         
-        await connection.query(`
+        await client.query(`
           CREATE TABLE IF NOT EXISTS audios (
             id SERIAL PRIMARY KEY,
             phrase_id INTEGER NOT NULL,
@@ -305,76 +375,73 @@ async function importPhrases() {
             FOREIGN KEY (phrase_id) REFERENCES phrases(id)
           )
         `);
-      }
 
-      // Lire le fichier JSON
-      const phrasesPath = path.join(__dirname, 'data', 'phrases.json');
-      console.log('Chemin absolu du fichier:', phrasesPath);
-      console.log('__dirname:', __dirname);
-      console.log('Vérification de l\'existence du fichier:', fs.existsSync(phrasesPath));
-      
-      try {
-        const jsonData = await fsp.readFile(phrasesPath, 'utf8');
-        const phrases = JSON.parse(jsonData);
-        console.log(`Nombre de phrases à importer : ${phrases.length}`);
-
-        // Vérifier si des phrases existent déjà
-        const [result] = await connection.query('SELECT COUNT(*) as count FROM phrases');
-        const existingCount = parseInt(result[0].count);
-        console.log(`Nombre de phrases existantes : ${existingCount}`);
-
-        if (existingCount > 0) {
-          const shouldContinue = process.env.FORCE_IMPORT === 'true';
-          if (!shouldContinue) {
-            console.log('Des phrases existent déjà. Pour forcer l\'importation, définissez FORCE_IMPORT=true');
-            return;
-          }
-          console.log('FORCE_IMPORT=true détecté, importation forcée...');
-        }
-
-        // Insérer chaque phrase
-        let insertedCount = 0;
-        let skippedCount = 0;
+        // Lire le fichier JSON
+        const phrasesPath = path.join(__dirname, 'data', 'phrases.json');
+        console.log('Chemin absolu du fichier:', phrasesPath);
+        console.log('__dirname:', __dirname);
+        console.log('Vérification de l\'existence du fichier:', fs.existsSync(phrasesPath));
         
-        await connection.beginTransaction();
-        
-        for (const item of phrases) {
-          try {
-            // Vérifier si la phrase existe déjà
-            const [existing] = await connection.query('SELECT id FROM phrases WHERE text = ?', [item.phrase]);
-            if (existing.length > 0) {
-              skippedCount++;
-              continue;
+        try {
+          const jsonData = await fsp.readFile(phrasesPath, 'utf8');
+          const phrases = JSON.parse(jsonData);
+          console.log(`Nombre de phrases à importer : ${phrases.length}`);
+
+          // Vérifier si des phrases existent déjà
+          const result = await client.query('SELECT COUNT(*) as count FROM phrases');
+          const existingCount = parseInt(result.rows[0].count);
+          console.log(`Nombre de phrases existantes : ${existingCount}`);
+
+          if (existingCount > 0) {
+            const shouldContinue = process.env.FORCE_IMPORT === 'true';
+            if (!shouldContinue) {
+              console.log('Des phrases existent déjà. Pour forcer l\'importation, définissez FORCE_IMPORT=true');
+              return;
             }
-
-            await connection.query('INSERT INTO phrases (text) VALUES (?)', [item.phrase]);
-            insertedCount++;
-            
-            if (insertedCount % 100 === 0) {
-              console.log(`${insertedCount} phrases insérées...`);
-            }
-          } catch (error) {
-            console.error(`Erreur lors de l'insertion de la phrase: ${item.phrase}`, error);
+            console.log('FORCE_IMPORT=true détecté, importation forcée...');
           }
+
+          // Insérer chaque phrase
+          let insertedCount = 0;
+          let skippedCount = 0;
+          
+          await client.query('BEGIN');
+          
+          for (const item of phrases) {
+            try {
+              // Vérifier si la phrase existe déjà
+              const existing = await client.query('SELECT id FROM phrases WHERE text = $1', [item.phrase]);
+              if (existing.rows.length > 0) {
+                skippedCount++;
+                continue;
+              }
+
+              await client.query('INSERT INTO phrases (text) VALUES ($1)', [item.phrase]);
+              insertedCount++;
+              
+              if (insertedCount % 100 === 0) {
+                console.log(`${insertedCount} phrases insérées...`);
+              }
+            } catch (error) {
+              console.error(`Erreur lors de l'insertion de la phrase: ${item.phrase}`, error);
+            }
+          }
+          
+          await client.query('COMMIT');
+
+          console.log('\nImportation terminée !');
+          console.log(`- ${insertedCount} nouvelles phrases insérées`);
+          console.log(`- ${skippedCount} phrases ignorées (déjà existantes)`);
+          console.log(`- Total des phrases dans la base : ${existingCount + insertedCount}`);
+
+        } catch (error) {
+          await client.query('ROLLBACK');
+          console.error('Erreur lors de la lecture du fichier phrases.json:', error);
+          throw error;
         }
-        
-        await connection.commit();
-
-        console.log('\nImportation terminée !');
-        console.log(`- ${insertedCount} nouvelles phrases insérées`);
-        console.log(`- ${skippedCount} phrases ignorées (déjà existantes)`);
-        console.log(`- Total des phrases dans la base : ${existingCount + insertedCount}`);
-
-      } catch (error) {
-        console.error('Erreur lors de la lecture du fichier phrases.json:', error);
-        throw error;
+      } finally {
+        client.release();
       }
-
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
     }
   } catch (error) {
     console.error('Erreur lors de l\'importation:', error);
