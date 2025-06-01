@@ -4,7 +4,6 @@ services:
     env: node
     buildCommand: |
       npm install
-      node scripts/post-deploy.js
     startCommand: node index.js
     envVars:
       - key: NODE_ENV

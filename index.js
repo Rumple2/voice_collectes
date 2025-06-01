@@ -4,8 +4,9 @@ const { Pool } = require('pg');
 const multer = require('multer');
 const path = require('path');
 const xlsx = require('xlsx');
+const fs = require('fs');
 const cloudinary = require('cloudinary').v2;
-const fs = require('fs').promises;
+const fsp = require('fs').promises;
 
 require('dotenv').config();
 
@@ -216,7 +217,7 @@ async function importPhrases() {
       console.log('Tentative de lecture du fichier:', phrasesPath);
       
       try {
-        const jsonData = await fs.readFile(phrasesPath, 'utf8');
+        const jsonData = await fsp.readFile(phrasesPath, 'utf8');
         const phrases = JSON.parse(jsonData);
         console.log(`Nombre de phrases à importer : ${phrases.length}`);
 
