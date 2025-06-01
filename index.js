@@ -5,10 +5,18 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const xlsx = require('xlsx');
+const cloudinary = require('cloudinary').v2;
 require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 3000;
+
+// Configuration Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
 // Créer les dossiers nécessaires
 const uploadsDir = path.join(__dirname, 'uploads', 'audio');
@@ -95,7 +103,7 @@ app.get('/check-config', async (req, res) => {
   }
 });
 
-// 📥 Configurer Multer pour upload audio
+// 📥 Configurer Multer pour upload audio temporaire
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, uploadsDir);
@@ -124,6 +132,7 @@ async function createTables() {
       phrase_id INTEGER NOT NULL,
       user_id VARCHAR(100),
       audio_url TEXT,
+      cloudinary_id VARCHAR(255),
       validated BOOLEAN DEFAULT FALSE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (phrase_id) REFERENCES phrases(id)
@@ -141,22 +150,44 @@ async function createTables() {
 // 📤 Upload audio (auth: user_id = email)
 app.post('/audios', upload.single('audio'), async (req, res) => {
   const { phrase_id, user_id } = req.body;
-  const audio_url = `/uploads/audio/${req.file.filename}`;
-
-  const client = await pool.connect();
+  
   try {
-    await client.query('BEGIN');
-    await client.query('INSERT INTO audios (phrase_id, user_id, audio_url) VALUES ($1, $2, $3)', 
-      [phrase_id, user_id, audio_url]);
-    await client.query('UPDATE phrases SET audio_count = audio_count + 1 WHERE id = $1', [phrase_id]);
-    await client.query('COMMIT');
-    res.json({ success: true, audio_url });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error(err);
-    res.status(500).json({ error: 'Erreur lors de l\'enregistrement.' });
-  } finally {
-    client.release();
+    // Upload vers Cloudinary
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      resource_type: "auto",
+      folder: "voice_collectes/audios"
+    });
+
+    // Supprimer le fichier temporaire
+    fs.unlinkSync(req.file.path);
+
+    const audio_url = result.secure_url;
+    const cloudinary_id = result.public_id;
+    
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        'INSERT INTO audios (phrase_id, user_id, audio_url, cloudinary_id) VALUES ($1, $2, $3, $4)', 
+        [phrase_id, user_id, audio_url, cloudinary_id]
+      );
+      await client.query('UPDATE phrases SET audio_count = audio_count + 1 WHERE id = $1', [phrase_id]);
+      await client.query('COMMIT');
+      res.json({ 
+        success: true, 
+        audio_url,
+        cloudinary_id 
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error(err);
+      res.status(500).json({ error: 'Erreur lors de l\'enregistrement.' });
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Erreur lors de l\'upload vers Cloudinary:', error);
+    res.status(500).json({ error: 'Erreur lors de l\'upload du fichier audio.' });
   }
 });
 

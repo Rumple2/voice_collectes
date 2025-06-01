@@ -31,6 +31,12 @@ services:
         fromDatabase:
           name: voice-collectes-db
           property: database
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
     healthCheckPath: /check-config
 
 databases:
