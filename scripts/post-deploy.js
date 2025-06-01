@@ -67,56 +67,65 @@ async function importPhrases() {
       `);
 
       // Lire le fichier JSON
-      const jsonData = await fs.readFile(path.join(__dirname, '../data/phrases.json'), 'utf8');
-      const phrases = JSON.parse(jsonData);
-      console.log(`Nombre de phrases à importer : ${phrases.length}`);
-
-      // Vérifier si des phrases existent déjà
-      const result = await client.query('SELECT COUNT(*) as count FROM phrases');
-      const existingCount = parseInt(result.rows[0].count);
-      console.log(`Nombre de phrases existantes : ${existingCount}`);
-
-      if (existingCount > 0) {
-        const shouldContinue = process.env.FORCE_IMPORT === 'true';
-        if (!shouldContinue) {
-          console.log('Des phrases existent déjà. Pour forcer l\'importation, définissez FORCE_IMPORT=true');
-          return;
-        }
-        console.log('FORCE_IMPORT=true détecté, importation forcée...');
-      }
-
-      // Insérer chaque phrase
-      let insertedCount = 0;
-      let skippedCount = 0;
+      const phrasesPath = path.join(__dirname, '..', 'data', 'phrases.json');
+      console.log('Tentative de lecture du fichier:', phrasesPath);
       
-      await client.query('BEGIN');
-      
-      for (const item of phrases) {
-        try {
-          // Vérifier si la phrase existe déjà
-          const existing = await client.query('SELECT id FROM phrases WHERE text = $1', [item.phrase]);
-          if (existing.rows.length > 0) {
-            skippedCount++;
-            continue;
+      try {
+        const jsonData = await fs.readFile(phrasesPath, 'utf8');
+        const phrases = JSON.parse(jsonData);
+        console.log(`Nombre de phrases à importer : ${phrases.length}`);
+
+        // Vérifier si des phrases existent déjà
+        const result = await client.query('SELECT COUNT(*) as count FROM phrases');
+        const existingCount = parseInt(result.rows[0].count);
+        console.log(`Nombre de phrases existantes : ${existingCount}`);
+
+        if (existingCount > 0) {
+          const shouldContinue = process.env.FORCE_IMPORT === 'true';
+          if (!shouldContinue) {
+            console.log('Des phrases existent déjà. Pour forcer l\'importation, définissez FORCE_IMPORT=true');
+            return;
           }
-
-          await client.query('INSERT INTO phrases (text) VALUES ($1)', [item.phrase]);
-          insertedCount++;
-          
-          if (insertedCount % 100 === 0) {
-            console.log(`${insertedCount} phrases insérées...`);
-          }
-        } catch (error) {
-          console.error(`Erreur lors de l'insertion de la phrase: ${item.phrase}`, error);
+          console.log('FORCE_IMPORT=true détecté, importation forcée...');
         }
-      }
-      
-      await client.query('COMMIT');
 
-      console.log('\nImportation terminée !');
-      console.log(`- ${insertedCount} nouvelles phrases insérées`);
-      console.log(`- ${skippedCount} phrases ignorées (déjà existantes)`);
-      console.log(`- Total des phrases dans la base : ${existingCount + insertedCount}`);
+        // Insérer chaque phrase
+        let insertedCount = 0;
+        let skippedCount = 0;
+        
+        await client.query('BEGIN');
+        
+        for (const item of phrases) {
+          try {
+            // Vérifier si la phrase existe déjà
+            const existing = await client.query('SELECT id FROM phrases WHERE text = $1', [item.phrase]);
+            if (existing.rows.length > 0) {
+              skippedCount++;
+              continue;
+            }
+
+            await client.query('INSERT INTO phrases (text) VALUES ($1)', [item.phrase]);
+            insertedCount++;
+            
+            if (insertedCount % 100 === 0) {
+              console.log(`${insertedCount} phrases insérées...`);
+            }
+          } catch (error) {
+            console.error(`Erreur lors de l'insertion de la phrase: ${item.phrase}`, error);
+          }
+        }
+        
+        await client.query('COMMIT');
+
+        console.log('\nImportation terminée !');
+        console.log(`- ${insertedCount} nouvelles phrases insérées`);
+        console.log(`- ${skippedCount} phrases ignorées (déjà existantes)`);
+        console.log(`- Total des phrases dans la base : ${existingCount + insertedCount}`);
+
+      } catch (error) {
+        console.error('Erreur lors de la lecture du fichier phrases.json:', error);
+        throw error;
+      }
 
     } catch (error) {
       await client.query('ROLLBACK');
