@@ -41,14 +41,33 @@ async function importPhrases() {
   try {
     // Attendre que la base de données soit prête
     const pool = await waitForDatabase();
-
-    // Lire le fichier JSON
-    const jsonData = await fs.readFile(path.join(__dirname, '../data/phrases.json'), 'utf8');
-    const phrases = JSON.parse(jsonData);
-
-    // Vérifier si des phrases existent déjà
     const client = await pool.connect();
     try {
+      // Création des tables si elles n'existent pas
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS phrases (
+          id SERIAL PRIMARY KEY,
+          text VARCHAR(255) NOT NULL,
+          audio_count INTEGER DEFAULT 0
+        )
+      `);
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS audios (
+          id SERIAL PRIMARY KEY,
+          phrase_id INTEGER NOT NULL,
+          user_id VARCHAR(100),
+          audio_url TEXT,
+          validated BOOLEAN DEFAULT FALSE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (phrase_id) REFERENCES phrases(id)
+        )
+      `);
+
+      // Lire le fichier JSON
+      const jsonData = await fs.readFile(path.join(__dirname, '../data/phrases.json'), 'utf8');
+      const phrases = JSON.parse(jsonData);
+
+      // Vérifier si des phrases existent déjà
       const result = await client.query('SELECT COUNT(*) as count FROM phrases');
       if (parseInt(result.rows[0].count) > 0) {
         console.log(`${result.rows[0].count} phrases existent déjà dans la base de données.`);
