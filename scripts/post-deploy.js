@@ -33,15 +33,16 @@ async function waitForDatabase(maxRetries = 10, retryInterval = 10000) {
   }
   
   console.error('Impossible de se connecter à la base de données après plusieurs tentatives');
-  console.log('L\'importation sera effectuée au prochain déploiement');
-  process.exit(0);
+  process.exit(1);
 }
 
 async function importPhrases() {
+  let pool;
   try {
     // Attendre que la base de données soit prête
-    const pool = await waitForDatabase();
+    pool = await waitForDatabase();
     const client = await pool.connect();
+    
     try {
       // Création des tables si elles n'existent pas
       await client.query(`
@@ -51,12 +52,14 @@ async function importPhrases() {
           audio_count INTEGER DEFAULT 0
         )
       `);
+      
       await client.query(`
         CREATE TABLE IF NOT EXISTS audios (
           id SERIAL PRIMARY KEY,
           phrase_id INTEGER NOT NULL,
           user_id VARCHAR(100),
           audio_url TEXT,
+          cloudinary_id VARCHAR(255),
           validated BOOLEAN DEFAULT FALSE,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (phrase_id) REFERENCES phrases(id)
@@ -66,16 +69,20 @@ async function importPhrases() {
       // Lire le fichier JSON
       const jsonData = await fs.readFile(path.join(__dirname, '../data/phrases.json'), 'utf8');
       const phrases = JSON.parse(jsonData);
+      console.log(`Nombre de phrases à importer : ${phrases.length}`);
 
       // Vérifier si des phrases existent déjà
       const result = await client.query('SELECT COUNT(*) as count FROM phrases');
-      if (parseInt(result.rows[0].count) > 0) {
-        console.log(`${result.rows[0].count} phrases existent déjà dans la base de données.`);
+      const existingCount = parseInt(result.rows[0].count);
+      console.log(`Nombre de phrases existantes : ${existingCount}`);
+
+      if (existingCount > 0) {
         const shouldContinue = process.env.FORCE_IMPORT === 'true';
         if (!shouldContinue) {
-          console.log('Pour forcer l\'importation, définissez FORCE_IMPORT=true dans les variables d\'environnement.');
+          console.log('Des phrases existent déjà. Pour forcer l\'importation, définissez FORCE_IMPORT=true');
           return;
         }
+        console.log('FORCE_IMPORT=true détecté, importation forcée...');
       }
 
       // Insérer chaque phrase
@@ -95,6 +102,7 @@ async function importPhrases() {
 
           await client.query('INSERT INTO phrases (text) VALUES ($1)', [item.phrase]);
           insertedCount++;
+          
           if (insertedCount % 100 === 0) {
             console.log(`${insertedCount} phrases insérées...`);
           }
@@ -105,19 +113,24 @@ async function importPhrases() {
       
       await client.query('COMMIT');
 
-      console.log(`\nImportation terminée !`);
+      console.log('\nImportation terminée !');
       console.log(`- ${insertedCount} nouvelles phrases insérées`);
       console.log(`- ${skippedCount} phrases ignorées (déjà existantes)`);
+      console.log(`- Total des phrases dans la base : ${existingCount + insertedCount}`);
+
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
     } finally {
       client.release();
-      await pool.end();
     }
   } catch (error) {
     console.error('Erreur lors de l\'importation:', error);
-    process.exit(0);
+    process.exit(1);
+  } finally {
+    if (pool) {
+      await pool.end();
+    }
   }
 }
 
