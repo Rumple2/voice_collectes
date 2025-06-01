@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: voice-collectes
+    env: node
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_HOST
+        fromDatabase:
+          name: voice-collectes-db
+          property: host
+      - key: DB_USER
+        fromDatabase:
+          name: voice-collectes-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: voice-collectes-db
+          property: password
+      - key: DB_NAME
+        fromDatabase:
+          name: voice-collectes-db
+          property: database
+
+databases:
+  - name: voice-collectes-db
+    databaseName: voice_collectes
+    user: voice_collectes_user
+    plan: free 

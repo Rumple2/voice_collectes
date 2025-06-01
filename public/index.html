@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Collecte de Données Vocales</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div id="login-section" class="section">
+            <h1>Collecte de Données Vocales</h1>
+            <div class="login-form">
+                <input type="email" id="email" placeholder="Entrez votre email" required>
+                <button onclick="startRecording()">Commencer</button>
+            </div>
+        </div>
+
+        <div id="recording-section" class="section hidden">
+            <div class="stats">
+                <p>Email: <span id="user-email"></span></p>
+                <p>Traductions effectuées: <span id="translations-count">0</span></p>
+            </div>
+            
+            <div class="phrase-container">
+                <h2>Phrase à traduire:</h2>
+                <p id="current-phrase"></p>
+            </div>
+
+            <div class="recording-controls">
+                <button id="record-button" onclick="toggleRecording()">
+                    <span class="record-icon">●</span> Enregistrer
+                </button>
+                <div id="recording-status" class="hidden">Enregistrement en cours...</div>
+            </div>
+
+            <div id="audio-preview" class="hidden">
+                <audio id="audio-player" controls></audio>
+                <button onclick="submitRecording()">Valider</button>
+                <button onclick="cancelRecording()">Annuler</button>
+            </div>
+        </div>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html> 
