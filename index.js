@@ -213,7 +213,7 @@ async function importPhrases() {
       `);
 
       // Lire le fichier JSON
-      const phrasesPath = path.join(__dirname, '..', 'data', 'phrases.json');
+      const phrasesPath = path.join(__dirname, 'data', 'phrases.json');
       console.log('Tentative de lecture du fichier:', phrasesPath);
       
       try {
