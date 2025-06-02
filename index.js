@@ -5,10 +5,45 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const xlsx = require('xlsx');
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 3000;
+
+// Configuration Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+// Configuration du stockage Cloudinary
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'voice_collectes',
+    resource_type: 'auto',
+    format: 'mp3'
+  }
+});
+
+// Middleware pour vérifier le format audio
+const audioFilter = (req, file, cb) => {
+  if (!file.mimetype.startsWith('audio/')) {
+    return cb(new Error('Seuls les fichiers audio sont acceptés'), false);
+  }
+  cb(null, true);
+};
+
+const upload = multer({
+  storage: storage,
+  fileFilter: audioFilter,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // Limite de 10MB
+  }
+});
 
 // Créer les dossiers nécessaires
 const uploadsDir = path.join(__dirname, 'uploads', 'audio');
@@ -27,18 +62,6 @@ const dbConfig = {
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME
 };
-
-// 📥 Configurer Multer pour upload audio
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadsDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueName = Date.now() + '-' + file.originalname;
-    cb(null, uniqueName);
-  }
-});
-const upload = multer({ storage });
 
 // 🔧 Création des tables au démarrage
 async function createTables() {
@@ -63,7 +86,15 @@ async function createTables() {
 // 📤 Upload audio (auth: user_id = email)
 app.post('/audios', upload.single('audio'), async (req, res) => {
   const { phrase_id, user_id } = req.body;
-  const audio_url = `/uploads/audio/${req.file.filename}`;
+  
+  if (!req.file) {
+    return res.status(400).json({ 
+      error: 'Erreur lors de l\'upload',
+      details: 'Format audio invalide. Le fichier doit être en WAV, 16kHz, mono.'
+    });
+  }
+
+  const audio_url = req.file.path; // Cloudinary URL
 
   try {
     const conn = await mysql.createConnection(dbConfig);
