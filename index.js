@@ -117,12 +117,12 @@ app.post('/audios', upload.single('audio'), async (req, res) => {
   }
 });
 
-// 📄 Phrase avec audio_count < 10
+// 📄 Phrase avec audio_count < 500
 app.get('/phrases/next', async (req, res) => {
   const client = await pool.connect();
   try {
     const { rows } = await client.query(
-      'SELECT * FROM phrases WHERE audio_count < 10 ORDER BY RANDOM() LIMIT 1'
+      'SELECT * FROM phrases WHERE audio_count < 500 ORDER BY RANDOM() LIMIT 1'
     );
     res.json(rows[0] || {});
   } catch (err) {
