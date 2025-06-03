@@ -1,45 +1,22 @@
 services:
   - type: web
-    name: voice-collectes
+    name: voice-collecte-backend
     env: node
-    buildCommand: |
-      npm install
+    buildCommand: npm install
     startCommand: node index.js
     envVars:
-      - key: NODE_ENV
-        value: production
-      - key: FORCE_IMPORT
-        value: "true"
-      - key: DB_HOST
+      - key: DATABASE_URL
         fromDatabase:
-          name: voice-collectes-db
-          property: host
-      - key: DB_PORT
-        fromDatabase:
-          name: voice-collectes-db
-          property: port
-      - key: DB_USER
-        fromDatabase:
-          name: voice-collectes-db
-          property: user
-      - key: DB_PASSWORD
-        fromDatabase:
-          name: voice-collectes-db
-          property: password
-      - key: DB_NAME
-        fromDatabase:
-          name: voice-collectes-db
-          property: database
+          name: voice-db
+          property: connectionString
       - key: CLOUDINARY_CLOUD_NAME
-        sync: false
+        value: ton_cloud_name
       - key: CLOUDINARY_API_KEY
-        sync: false
+        value: ta_api_key
       - key: CLOUDINARY_API_SECRET
-        sync: false
-    healthCheckPath: /check-config
+        value: ton_api_secret
 
 databases:
-  - name: voice-collectes-db
-    databaseName: voice_collectes
-    user: root
-    plan: free 
+  - name: voice-db
+    databaseName: voice_db
+    user: voice_user

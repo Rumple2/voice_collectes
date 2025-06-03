@@ -52,10 +52,10 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // 🗄️ Connexion PostgreSQL
 const pool = new Pool({
-  user: 'postgres',
-  host: 'localhost',
-  database: process.env.DB_NAME,
-  password: process.env.DB_PASSWORD,
+  user: 'root',
+  host: 'dpg-d0u4hv63jp1c73fdi5b0-a',
+  database: 'voice_collectes',
+  password: 'ymx3p24csJolVG1VFCCsbzHxPH7d7ApP',
   port: 5432
 });
 

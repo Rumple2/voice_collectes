@@ -11,12 +11,12 @@ async function importPhrases() {
 
     // Configuration PostgreSQL
     const pool = new Pool({
-      user: 'postgres',
-      host: 'localhost',
-      database: process.env.DB_NAME,
-      password: process.env.DB_PASSWORD,
-      port: 5432
-    });
+        user: 'root',
+        host: 'dpg-d0u4hv63jp1c73fdi5b0-a',
+        database: 'voice_collectes',
+        password: 'ymx3p24csJolVG1VFCCsbzHxPH7d7ApP',
+        port: 5432
+      });
 
     const client = await pool.connect();
     console.log('Connecté à la base de données');
