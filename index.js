@@ -1,6 +1,5 @@
-// 📁 backend/index.js
 const express = require('express');
-const mysql = require('mysql2/promise');
+const { Pool } = require('pg');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -12,16 +11,15 @@ require('dotenv').config();
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Configuration Cloudinary
+// 🌩️ Configuration Cloudinary
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// Configuration du stockage Cloudinary
 const storage = new CloudinaryStorage({
-  cloudinary: cloudinary,
+  cloudinary,
   params: {
     folder: 'voice_collectes',
     resource_type: 'auto',
@@ -29,7 +27,6 @@ const storage = new CloudinaryStorage({
   }
 });
 
-// Middleware pour vérifier le format audio
 const audioFilter = (req, file, cb) => {
   if (!file.mimetype.startsWith('audio/')) {
     return cb(new Error('Seuls les fichiers audio sont acceptés'), false);
@@ -38,14 +35,12 @@ const audioFilter = (req, file, cb) => {
 };
 
 const upload = multer({
-  storage: storage,
+  storage,
   fileFilter: audioFilter,
-  limits: {
-    fileSize: 10 * 1024 * 1024 // Limite de 10MB
-  }
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB
 });
 
-// Créer les dossiers nécessaires
+// 📁 Dossiers
 const uploadsDir = path.join(__dirname, 'uploads', 'audio');
 const exportsDir = path.join(__dirname, 'exports');
 fs.mkdirSync(uploadsDir, { recursive: true });
@@ -55,95 +50,115 @@ app.use(express.json());
 app.use(express.static('public'));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// 🗄️ Connexion MySQL
-const dbConfig = {
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
+// 🗄️ Connexion PostgreSQL
+const pool = new Pool({
+  user: 'postgres',
+  host: 'localhost',
+  database: process.env.DB_NAME,
   password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME
-};
+  port: 5432
+});
 
-// 🔧 Création des tables au démarrage
+// 🔧 Création des tables
 async function createTables() {
-  const conn = await mysql.createConnection(dbConfig);
-  await conn.query(`CREATE TABLE IF NOT EXISTS phrases (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    text VARCHAR(255) NOT NULL,
-    audio_count INT DEFAULT 0
-  )`);
-  await conn.query(`CREATE TABLE IF NOT EXISTS audios (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    phrase_id INT NOT NULL,
-    user_id VARCHAR(100),
-    audio_url TEXT,
-    validated BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (phrase_id) REFERENCES phrases(id)
-  )`);
-  await conn.end();
+  const client = await pool.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS phrases (
+        id SERIAL PRIMARY KEY,
+        text VARCHAR(255) NOT NULL,
+        audio_count INT DEFAULT 0
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS audios (
+        id SERIAL PRIMARY KEY,
+        phrase_id INT NOT NULL REFERENCES phrases(id),
+        user_id VARCHAR(100),
+        audio_url TEXT,
+        validated BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  } finally {
+    client.release();
+  }
 }
 
-// 📤 Upload audio (auth: user_id = email)
+// 📤 Upload audio
 app.post('/audios', upload.single('audio'), async (req, res) => {
   const { phrase_id, user_id } = req.body;
-  
+
   if (!req.file) {
-    return res.status(400).json({ 
+    return res.status(400).json({
       error: 'Erreur lors de l\'upload',
       details: 'Format audio invalide. Le fichier doit être en WAV, 16kHz, mono.'
     });
   }
 
-  const audio_url = req.file.path; // Cloudinary URL
+  const audio_url = req.file.path;
 
+  const client = await pool.connect();
   try {
-    const conn = await mysql.createConnection(dbConfig);
-    await conn.query('INSERT INTO audios (phrase_id, user_id, audio_url) VALUES (?, ?, ?)', [phrase_id, user_id, audio_url]);
-    await conn.query('UPDATE phrases SET audio_count = audio_count + 1 WHERE id = ?', [phrase_id]);
-    await conn.end();
+    await client.query(
+      'INSERT INTO audios (phrase_id, user_id, audio_url) VALUES ($1, $2, $3)',
+      [phrase_id, user_id, audio_url]
+    );
+    await client.query(
+      'UPDATE phrases SET audio_count = audio_count + 1 WHERE id = $1',
+      [phrase_id]
+    );
     res.json({ success: true, audio_url });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur lors de l\'enregistrement.' });
+  } finally {
+    client.release();
   }
 });
 
-// 📄 Récupérer une phrase avec audio_count < 10
+// 📄 Phrase avec audio_count < 10
 app.get('/phrases/next', async (req, res) => {
+  const client = await pool.connect();
   try {
-    const conn = await mysql.createConnection(dbConfig);
-    const [rows] = await conn.query('SELECT * FROM phrases WHERE audio_count < 10 ORDER BY RAND() LIMIT 1');
-    await conn.end();
+    const { rows } = await client.query(
+      'SELECT * FROM phrases WHERE audio_count < 10 ORDER BY RANDOM() LIMIT 1'
+    );
     res.json(rows[0] || {});
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur lors de la récupération.' });
+  } finally {
+    client.release();
   }
 });
 
-// 📊 Récupérer le nombre de traductions par utilisateur
+// 📊 Statistiques utilisateur
 app.get('/stats/:email', async (req, res) => {
+  const client = await pool.connect();
   try {
-    const conn = await mysql.createConnection(dbConfig);
-    const [rows] = await conn.query('SELECT COUNT(*) as count FROM audios WHERE user_id = ?', [req.params.email]);
-    await conn.end();
-    res.json({ count: rows[0].count });
+    const { rows } = await client.query(
+      'SELECT COUNT(*) AS count FROM audios WHERE user_id = $1',
+      [req.params.email]
+    );
+    res.json({ count: parseInt(rows[0].count) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur lors de la récupération des statistiques.' });
+  } finally {
+    client.release();
   }
 });
 
-// 📦 Exporter toutes les audios avec texte en Excel
+// 📦 Exporter audios en Excel
 app.get('/export/audios', async (req, res) => {
+  const client = await pool.connect();
   try {
-    const conn = await mysql.createConnection(dbConfig);
-    const [rows] = await conn.query(`
+    const { rows } = await client.query(`
       SELECT a.id, p.text AS phrase, a.user_id, a.audio_url, a.created_at
       FROM audios a
       JOIN phrases p ON a.phrase_id = p.id
     `);
-    await conn.end();
 
     const worksheet = xlsx.utils.json_to_sheet(rows);
     const workbook = xlsx.utils.book_new();
@@ -156,10 +171,12 @@ app.get('/export/audios', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur lors de l\'exportation.' });
+  } finally {
+    client.release();
   }
 });
 
-// 🚀 Démarrer serveur et créer tables
+// 🚀 Lancer le serveur
 app.listen(port, async () => {
   await createTables();
   console.log(`Serveur démarré sur http://localhost:${port}`);
