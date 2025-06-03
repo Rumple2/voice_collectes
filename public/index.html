@@ -3,136 +3,44 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Collecte de Voix</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        body {
-            background-color: #f8f9fa;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        .container {
-            max-width: 800px;
-            margin-top: 2rem;
-        }
-        .card {
-            border-radius: 15px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            margin-bottom: 2rem;
-        }
-        .card-header {
-            background-color: #007bff;
-            color: white;
-            border-radius: 15px 15px 0 0 !important;
-            padding: 1rem;
-        }
-        .btn-record {
-            background-color: #dc3545;
-            border: none;
-            border-radius: 50%;
-            width: 60px;
-            height: 60px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 1rem auto;
-            transition: all 0.3s ease;
-        }
-        .btn-record:hover {
-            transform: scale(1.1);
-            background-color: #c82333;
-        }
-        .btn-record.recording {
-            animation: pulse 1.5s infinite;
-        }
-        .btn-record i {
-            color: white;
-            font-size: 1.5rem;
-        }
-        .timer {
-            font-size: 1.2rem;
-            font-weight: bold;
-            color: #6c757d;
-            text-align: center;
-            margin: 1rem 0;
-        }
-        .phrase-text {
-            font-size: 1.5rem;
-            color: #343a40;
-            text-align: center;
-            margin: 1rem 0;
-            padding: 1rem;
-            background-color: #e9ecef;
-            border-radius: 10px;
-        }
-        .stats {
-            font-size: 1.1rem;
-            color: #6c757d;
-        }
-        .loading-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            display: none;
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-        }
-        .loading-spinner {
-            width: 50px;
-            height: 50px;
-            border: 5px solid #f3f3f3;
-            border-top: 5px solid #007bff;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        .loading-text {
-            color: white;
-            margin-top: 1rem;
-            font-size: 1.2rem;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        @keyframes pulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.1); }
-            100% { transform: scale(1); }
-        }
-    </style>
+    <title>Collecte de Données (Ramses Galanga)</title>
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <div class="container">
-        <div class="card">
-            <div class="card-header">
-                <h1 class="text-center mb-0">Collecte de Voix</h1>
+        <div id="login-section" class="section">
+            <h1>Collecte de Données Vocales en langue locale EWE </h1>
+            <div class="login-form">
+                <input type="email" id="email" placeholder="Entrez votre email" required>
+                <button onclick="startRecording()">Commencer</button>
             </div>
-            <div class="card-body">
-                <div class="phrase-text" id="phraseText">Chargement...</div>
-                <div class="timer" id="timer">00:00</div>
-                <button class="btn btn-record" id="recordButton">
-                    <i class="fas fa-microphone"></i>
+        </div>
+
+        <div id="recording-section" class="section hidden">
+            <div class="stats">
+                <p>Email: <span id="user-email"></span></p>
+                <p>Traductions effectuées: <span id="translations-count">0</span></p>
+            </div>
+            
+            <div class="phrase-container">
+                <h2>Phrase à traduire en ewe:</h2>
+                <p id="current-phrase"></p>
+            </div>
+
+            <div class="recording-controls">
+                <button id="record-button" onclick="toggleRecording()">
+                    <span class="record-icon">●</span> Enregistrer
                 </button>
-                <div class="stats text-center">
-                    <p>Enregistrements effectués : <span id="recordCount">0</span></p>
-                </div>
+                <div id="recording-status" class="hidden">Enregistrement en cours...</div>
+            </div>
+
+            <div id="audio-preview" class="hidden">
+                <audio id="audio-player" controls></audio>
+                <button onclick="submitRecording()">Valider</button>
+                <button onclick="cancelRecording()">Annuler</button>
             </div>
         </div>
     </div>
-
-    <!-- Loading Overlay -->
-    <div class="loading-overlay" id="loadingOverlay">
-        <div class="text-center">
-            <div class="loading-spinner"></div>
-            <div class="loading-text">Traitement en cours...</div>
-        </div>
-    </div>
-
-    <script src="https://kit.fontawesome.com/your-font-awesome-kit.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="script.js"></script>
+    <script src="app.js"></script>
 </body>
 </html> 
