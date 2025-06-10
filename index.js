@@ -155,7 +155,7 @@ app.get('/export/audios', async (req, res) => {
   const client = await pool.connect();
   try {
     const { rows } = await client.query(`
-      SELECT a.id, p.text AS phrase, a.user_id, a.audio_url, a.created_at
+      SELECT a.id, p.text , p.phrase_ewe AS phrase, a.user_id, a.audio_url, a.created_at
       FROM audios a
       JOIN phrases p ON a.phrase_id = p.id
     `);
